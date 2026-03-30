@@ -1,0 +1,47 @@
+# Copia a config.yaml y ajusta.
+
+lookback_days: 45
+
+sources:
+  santander:
+    enabled: true
+    from_contains:
+      - "santander.com.ar"
+      - "mails.santander.com.ar"
+    subject_contains:
+      - "aviso de transferencia"
+    imap_from_hints:
+      - "santander.com.ar"
+    # Opcional: no exportar avisos que sean transferencias a vos mismo desde ARQ / cuentas vinculadas
+    # self_transfer:
+    #   enabled: true
+    #   match_hints:
+    #     - "arq"
+    #     - "dolarapp"
+
+  # ARQ (antes DolarApp). Si tenías `dolarapp:` en un yaml viejo, sigue funcionando.
+  arq:
+    enabled: true
+    # El remitente sigue siendo a menudo no-reply@dolarapp.com; añadí arqfinance.com por si cambian dominio.
+    from_contains:
+      - "dolarapp.com"
+      - "arqfinance.com"
+    subject_contains:
+      - "enviaste"
+    imap_from_hints:
+      - "dolarapp.com"
+    wallet_impute_currency: USD
+    # wallet_impute_description_template: "[Cuenta {wallet_currency}] {description}"
+    # Transferencias ARQ → tu Santander (mismo titular): no van al CSV como gasto
+    self_transfer:
+      enabled: false
+      # Poné enabled: true y pistas concretas (CBU, alias, tu nombre) para no coincidir con el pie legal del mail
+      match_hints:
+        - "santander"
+        - "PAEZ FRANCISCO"
+        # - "1747"  # ej. últimos dígitos de cuenta
+
+wallet:
+  csv_path: ./data/gastos_wallet.csv
+
+state_db_path: ./data/sync_state.db

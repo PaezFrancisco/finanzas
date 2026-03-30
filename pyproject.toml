@@ -1,0 +1,19 @@
+[project]
+name = "wallet-sync"
+version = "0.1.0"
+description = "Sincroniza gastos desde correo (Santander, ARQ) hacia CSV"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+  "python-dotenv>=1.0.0",
+  "PyYAML>=6.0.1",
+  "rich>=13.0.0",
+  "click>=8.1.0",
+]
+
+[project.scripts]
+wallet-sync = "wallet_sync.cli:main"
+
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
