@@ -42,6 +42,8 @@ Verás en consola el flujo: archivo de config, parsers, conexión IMAP, cuántos
 
 La ruta del CSV se define en `wallet.csv_path` dentro de `config.yaml`.
 
+`wallet.csv_mode` puede ser `append` (por defecto: solo gastos nuevos según `sync_state.db`) o `replace`: en cada sync **se sobrescribe** el CSV con los movimientos únicos de la ventana IMAP (`lookback_days`). Sirve si el archivo acumuló duplicados o querés que coincida con lo que hay en el buzón en ese rango. Fuera de esa ventana, los mails no entran: si necesitás histórico largo en un solo CSV, subí `lookback_days` o volvé a `append`.
+
 Tras cada exportación con gastos nuevos, la consola muestra un **resumen de ARS por día** (separando ARQ y Santander) para que puedas cruzar cada fecha con los **USD** que convertiste en la app ARQ y cargarlos en tu cuenta USD de la wallet.
 
 ## ARQ: cuenta USD vs monto en ARS en el mail

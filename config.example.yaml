@@ -1,6 +1,6 @@
 # Copia a config.yaml y ajusta.
 
-lookback_days: 45
+lookback_days: 20
 
 sources:
   santander:
@@ -43,5 +43,8 @@ sources:
 
 wallet:
   csv_path: ./data/gastos_wallet.csv
+  # append = solo filas nuevas (dedup con sync_state.db). replace = sobrescribe el CSV con movimientos
+  # únicos de la ventana IMAP (lookback_days); evita filas viejas/duplicadas en el archivo.
+  csv_mode: append
 
 state_db_path: ./data/sync_state.db

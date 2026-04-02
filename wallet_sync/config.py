@@ -48,6 +48,9 @@ def merged_config(project_root: Path) -> dict[str, Any]:
     cfg = load_yaml_config(yaml_path)
     cfg.setdefault("lookback_days", 30)
     cfg.setdefault("sources", {})
-    cfg.setdefault("wallet", {"mode": "csv", "csv_path": "./data/gastos_wallet.csv"})
+    cfg.setdefault(
+        "wallet",
+        {"csv_path": "./data/gastos_wallet.csv", "csv_mode": "append"},
+    )
     cfg.setdefault("state_db_path", "./data/sync_state.db")
     return cfg

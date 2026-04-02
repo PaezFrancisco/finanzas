@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import csv
 import logging
+from datetime import date
 from pathlib import Path
 
 from wallet_sync.models import Expense
@@ -43,4 +44,35 @@ class CsvWalletSink(WalletSink):
             len(expenses),
             self._path.resolve(),
             " (archivo nuevo)" if new_file else "",
+        )
+
+    def replace_all(self, expenses: list[Expense]) -> None:
+        """Sobrescribe el CSV con exactamente estas filas (ordenadas por fecha)."""
+        self._path.parent.mkdir(parents=True, exist_ok=True)
+        sorted_rows = sorted(
+            expenses,
+            key=lambda e: (
+                e.occurred_on or date.min,
+                e.source,
+                str(e.amount),
+                e.description[:40],
+            ),
+        )
+        with self._path.open("w", encoding="utf-8", newline="") as f:
+            w = csv.DictWriter(f, fieldnames=list(self.HEADERS))
+            w.writeheader()
+            for e in sorted_rows:
+                w.writerow(
+                    {
+                        "fecha": e.occurred_on.isoformat() if e.occurred_on else "",
+                        "monto": str(e.amount),
+                        "moneda": e.currency,
+                        "comercio": e.merchant,
+                        "descripcion": e.description,
+                    }
+                )
+        logger.info(
+            "CSV: archivo [bold]reemplazado[/bold] con [bold]%d[/bold] fila(s) en [bold]%s[/bold]",
+            len(sorted_rows),
+            self._path.resolve(),
         )
