@@ -53,6 +53,7 @@ class ArqParser(Parser):
                         email_message_id=raw.message_id,
                         raw_subject=raw.subject,
                         raw_snippet=text[:500],
+                        imap_uid=raw.imap_uid,
                     )
                 ]
 
@@ -75,6 +76,7 @@ class ArqParser(Parser):
                         email_message_id=raw.message_id,
                         raw_subject=raw.subject,
                         raw_snippet=text[:500],
+                        imap_uid=raw.imap_uid,
                     )
                 ]
 
@@ -94,6 +96,7 @@ class ArqParser(Parser):
                 email_message_id=raw.message_id,
                 raw_subject=raw.subject,
                 raw_snippet=text[:500],
+                imap_uid=raw.imap_uid,
             )
         ]
 

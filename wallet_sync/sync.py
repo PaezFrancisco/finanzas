@@ -4,15 +4,14 @@ import logging
 from pathlib import Path
 from typing import Any
 
-from wallet_sync.config import imap_settings_from_env, merged_config
+from wallet_sync.config import arq_source_config, imap_settings_from_env, merged_config
 from wallet_sync.email_client import ImapClient
 from wallet_sync.models import Expense
-from wallet_sync.config import arq_source_config
 from wallet_sync.parsers import ArqParser, SantanderParser, parse_with_chain
-from wallet_sync.storage import DedupStore
-from wallet_sync.sinks import CsvWalletSink, WalletSink
 from wallet_sync.post_export import log_daily_ars_for_reconciliation
 from wallet_sync.self_transfer import should_skip_as_self_transfer
+from wallet_sync.sinks import CsvWalletSink, WalletSink
+from wallet_sync.storage import DedupStore
 from wallet_sync.wallet_export import apply_arq_wallet_rules
 
 logger = logging.getLogger(__name__)
@@ -75,6 +74,12 @@ def _build_sinks(cfg: dict[str, Any], project_root: Path) -> list[WalletSink]:
 
 
 def run_sync(project_root: Path | None = None) -> int:
+    """
+    1) Lee el correo (ventana lookback_days).
+    2) Por cada gasto parseado: si ya está en sync_state.db, se descarta.
+    3) Reemplaza el CSV entero solo con los gastos nuevos (no estaban en la BD).
+    4) Marca en la BD los gastos exportados.
+    """
     root = project_root or Path.cwd()
     cfg = merged_config(root)
     lookback = int(cfg.get("lookback_days") or 30)
@@ -108,31 +113,21 @@ def run_sync(project_root: Path | None = None) -> int:
     store = DedupStore(state_path)
     logger.info("Base de deduplicación: [bold]%s[/bold]", state_path.resolve())
 
+    w_cfg = cfg.get("wallet") or {}
     sinks = _build_sinks(cfg, root)
+    csv_path = (root.resolve() / (w_cfg.get("csv_path") or "./data/gastos_wallet.csv")).resolve()
     for s in sinks:
         logger.info("Destino de salida: [bold]%s[/bold]", type(s).__name__)
+    logger.info(
+        "CSV: [bold]%s[/bold] — en cada sync se [bold]reemplaza[/bold] el archivo solo con gastos "
+        "[bold]nuevos[/bold] (no presentes en la BD antes de este run).",
+        csv_path,
+    )
 
-    w_cfg = cfg.get("wallet") or {}
-    csv_mode = str(w_cfg.get("csv_mode") or "append").lower().strip()
-    csv_replace = csv_mode in ("replace", "overwrite", "rewrite")
-    if csv_mode not in ("append", "replace", "overwrite", "rewrite"):
-        logger.warning(
-            "wallet.csv_mode=[bold]%s[/bold] no reconocido; uso [bold]append[/bold]. Valores: append, replace.",
-            csv_mode,
-        )
-        csv_replace = False
-    if csv_replace:
-        logger.info(
-            "Modo CSV: [bold]replace[/bold] — el archivo se [bold]sobrescribe[/bold] con los movimientos "
-            "de la ventana IMAP ([bold]%s[/bold] días); no se acumulan duplicados en el archivo.",
-            lookback,
-        )
-
-    new_expenses: list[Expense] = []
-    by_stable: dict[str, Expense] = {}
+    # Un gasto por stable_id en esta corrida (mismo mail duplicado → una entrada)
+    por_sid: dict[str, Expense] = {}
     emails_processed = 0
     gastos_parseados = 0
-    duplicados = 0
     omitidos_transferencia_propia = 0
 
     try:
@@ -154,7 +149,7 @@ def run_sync(project_root: Path | None = None) -> int:
                     for exp in parse_with_chain(raw, parsers):
                         gastos_parseados += 1
                         if should_skip_as_self_transfer(exp, cfg):
-                            store.mark_imported(exp.stable_id())
+                            store.mark_imported_expense(exp)
                             omitidos_transferencia_propia += 1
                             logger.info(
                                 "[yellow]Omitido (transferencia propia entre cuentas):[/yellow] "
@@ -165,96 +160,64 @@ def run_sync(project_root: Path | None = None) -> int:
                                 exp.description[:100],
                             )
                             continue
-                        if csv_replace:
-                            sid = exp.stable_id()
-                            by_stable[sid] = exp
-                            logger.debug(
-                                "Ventana replace: %s %s %s — %s",
-                                exp.source,
-                                exp.amount,
-                                exp.currency,
-                                exp.description[:80],
-                            )
-                            continue
-                        if store.is_imported(exp.stable_id()):
-                            duplicados += 1
-                            logger.debug(
-                                "Omitido (ya importado): %s %s %s",
-                                exp.source,
-                                exp.amount,
-                                exp.description[:60],
-                            )
-                            continue
-                        new_expenses.append(exp)
-                        logger.info(
-                            "Nuevo gasto: [bold]%s[/bold] %s %s — %s",
-                            exp.source,
-                            exp.amount,
-                            exp.currency,
-                            exp.description[:100],
-                        )
+                        por_sid[exp.stable_id()] = exp
         except Exception:
             logger.exception("Error durante la conexión o lectura IMAP")
             return 1
 
-        if csv_replace:
-            all_for_csv = list(by_stable.values())
+        en_correo = list(por_sid.values())
+        duplicados_bd = 0
+        nuevos: list[Expense] = []
+        for exp in en_correo:
+            if store.is_imported_expense(exp):
+                duplicados_bd += 1
+                logger.debug(
+                    "Descartado (ya en BD): %s | %s %s",
+                    exp.stable_id(),
+                    exp.source,
+                    exp.description[:70],
+                )
+                continue
+            nuevos.append(exp)
             logger.info(
-                "Resumen buzón: mensajes revisados=[bold]%d[/bold] | gastos detectados por parsers=[bold]%d[/bold] | "
-                "omitidos (transferencia propia)=[bold]%d[/bold] | "
-                "[green]movimientos únicos en ventana=[bold]%d[/bold][/green] (CSV reemplazado)",
-                emails_processed,
-                gastos_parseados,
-                omitidos_transferencia_propia,
-                len(all_for_csv),
+                "A exportar (no estaba en la BD): [bold]%s[/bold] %s %s — %s",
+                exp.source,
+                exp.amount,
+                exp.currency,
+                exp.description[:100],
             )
-            to_export = [apply_arq_wallet_rules(e, cfg) for e in all_for_csv]
-            for sink in sinks:
-                if hasattr(sink, "replace_all"):
-                    sink.replace_all(to_export)
-                else:
-                    sink.push(to_export)
-            for exp in all_for_csv:
-                store.mark_imported(exp.stable_id())
-            if all_for_csv:
-                logger.info(
-                    "[green]CSV actualizado: [bold]%d[/bold] fila(s) en la ventana de fechas.[/green]",
-                    len(all_for_csv),
-                )
-                log_daily_ars_for_reconciliation(all_for_csv)
+
+        to_export = [apply_arq_wallet_rules(e, cfg) for e in nuevos]
+
+        for sink in sinks:
+            if hasattr(sink, "replace_all"):
+                sink.replace_all(to_export)
             else:
-                for sink in sinks:
-                    if hasattr(sink, "replace_all"):
-                        sink.replace_all([])
-                logger.info(
-                    "No hay movimientos en la ventana (CSV dejado solo con encabezado)."
-                )
+                sink.push(to_export)
+
+        for exp in nuevos:
+            store.mark_imported_expense(exp)
+
+        logger.info(
+            "Resumen: mensajes=[bold]%d[/bold] | parseados=[bold]%d[/bold] | "
+            "omitidos transferencia propia=[bold]%d[/bold] | ya en BD (descartados)=[bold]%d[/bold] | "
+            "[green]nuevos en CSV=[bold]%d[/bold][/green]",
+            emails_processed,
+            gastos_parseados,
+            omitidos_transferencia_propia,
+            duplicados_bd,
+            len(nuevos),
+        )
+        if nuevos:
+            logger.info(
+                "[green]CSV reemplazado con [bold]%d[/bold] fila(s) nueva(s).[/green]",
+                len(nuevos),
+            )
+            log_daily_ars_for_reconciliation(nuevos)
         else:
             logger.info(
-                "Resumen buzón: mensajes revisados=[bold]%d[/bold] | gastos detectados por parsers=[bold]%d[/bold] | "
-                "ya estaban importados=[bold]%d[/bold] | omitidos (transferencia propia)=[bold]%d[/bold] | "
-                "[green]nuevos a exportar=[bold]%d[/bold][/green]",
-                emails_processed,
-                gastos_parseados,
-                duplicados,
-                omitidos_transferencia_propia,
-                len(new_expenses),
+                "[dim]Nada nuevo respecto a la BD: CSV con solo encabezado.[/dim]"
             )
-            to_export = [apply_arq_wallet_rules(e, cfg) for e in new_expenses]
-            for sink in sinks:
-                sink.push(to_export)
-            for exp in new_expenses:
-                store.mark_imported(exp.stable_id())
-            if new_expenses:
-                logger.info(
-                    "[green]Exportación completada: [bold]%d[/bold] gasto(s) nuevo(s) guardados.[/green]",
-                    len(new_expenses),
-                )
-                log_daily_ars_for_reconciliation(new_expenses)
-            else:
-                logger.info(
-                    "No se añadieron gastos nuevos (o no hubo coincidencias con Santander/ARQ en el texto del mail)."
-                )
     finally:
         store.close()
 

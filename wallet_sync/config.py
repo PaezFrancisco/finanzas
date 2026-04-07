@@ -40,6 +40,17 @@ def arq_source_config(cfg: dict[str, Any]) -> dict[str, Any]:
     return dict(block) if isinstance(block, dict) else {}
 
 
+def _normalize_wallet(cfg: dict[str, Any]) -> None:
+    defaults: dict[str, Any] = {"csv_path": "./data/gastos_wallet.csv"}
+    w = cfg.get("wallet")
+    if not isinstance(w, dict):
+        w = {}
+    merged = {**defaults, **w}
+    # Obsoleto: el sync siempre reemplaza el CSV con solo gastos nuevos vs la BD.
+    merged.pop("csv_mode", None)
+    cfg["wallet"] = merged
+
+
 def merged_config(project_root: Path) -> dict[str, Any]:
     load_env(project_root)
     yaml_path = project_root / "config.yaml"
@@ -48,9 +59,6 @@ def merged_config(project_root: Path) -> dict[str, Any]:
     cfg = load_yaml_config(yaml_path)
     cfg.setdefault("lookback_days", 30)
     cfg.setdefault("sources", {})
-    cfg.setdefault(
-        "wallet",
-        {"csv_path": "./data/gastos_wallet.csv", "csv_mode": "append"},
-    )
     cfg.setdefault("state_db_path", "./data/sync_state.db")
+    _normalize_wallet(cfg)
     return cfg

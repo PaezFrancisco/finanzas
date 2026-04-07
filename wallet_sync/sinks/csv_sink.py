@@ -11,66 +11,48 @@ from wallet_sync.sinks.base import WalletSink
 logger = logging.getLogger(__name__)
 
 
-class CsvWalletSink(WalletSink):
-    """CSV con columnas fijas para importar en la wallet: fecha, monto, moneda, comercio, descripcion."""
+def _row_sort_key(row: dict[str, str]) -> tuple[date, str, str]:
+    try:
+        d = date.fromisoformat((row.get("fecha") or "").strip())
+    except ValueError:
+        d = date.min
+    return (d, str(row.get("comercio") or ""), str(row.get("stable_id") or ""))
 
-    HEADERS = ("fecha", "monto", "moneda", "comercio", "descripcion")
+
+class CsvWalletSink(WalletSink):
+    """CSV para la wallet. Columna stable_id para trazabilidad. Siempre se reemplaza el archivo entero desde sync."""
+
+    HEADERS = ("fecha", "monto", "moneda", "comercio", "descripcion", "stable_id")
 
     def __init__(self, path: Path) -> None:
         self._path = path
         self._path.parent.mkdir(parents=True, exist_ok=True)
 
+    @staticmethod
+    def _expense_to_row(e: Expense) -> dict[str, str]:
+        return {
+            "fecha": e.occurred_on.isoformat() if e.occurred_on else "",
+            "monto": str(e.amount),
+            "moneda": e.currency,
+            "comercio": e.merchant,
+            "descripcion": e.description,
+            "stable_id": e.stable_id(),
+        }
+
     def push(self, expenses: list[Expense]) -> None:
-        if not expenses:
-            logger.info("CSV: sin filas nuevas para [dim]%s[/dim]", self._path)
-            return
-        new_file = not self._path.is_file()
-        with self._path.open("a", encoding="utf-8", newline="") as f:
-            w = csv.DictWriter(f, fieldnames=list(self.HEADERS))
-            if new_file:
-                w.writeheader()
-            for e in expenses:
-                w.writerow(
-                    {
-                        "fecha": e.occurred_on.isoformat() if e.occurred_on else "",
-                        "monto": str(e.amount),
-                        "moneda": e.currency,
-                        "comercio": e.merchant,
-                        "descripcion": e.description,
-                    }
-                )
-        logger.info(
-            "CSV: escritas [bold]%d[/bold] fila(s) en [bold]%s[/bold]%s",
-            len(expenses),
-            self._path.resolve(),
-            " (archivo nuevo)" if new_file else "",
-        )
+        """Alias de replace_all (interfaz WalletSink)."""
+        self.replace_all(expenses)
 
     def replace_all(self, expenses: list[Expense]) -> None:
-        """Sobrescribe el CSV con exactamente estas filas (ordenadas por fecha)."""
+        """Sobrescribe el CSV con exactamente estos gastos (ordenados por fecha)."""
         self._path.parent.mkdir(parents=True, exist_ok=True)
-        sorted_rows = sorted(
-            expenses,
-            key=lambda e: (
-                e.occurred_on or date.min,
-                e.source,
-                str(e.amount),
-                e.description[:40],
-            ),
-        )
+        rows = [self._expense_to_row(e) for e in expenses]
+        sorted_rows = sorted(rows, key=_row_sort_key)
         with self._path.open("w", encoding="utf-8", newline="") as f:
-            w = csv.DictWriter(f, fieldnames=list(self.HEADERS))
+            w = csv.DictWriter(f, fieldnames=list(self.HEADERS), extrasaction="ignore")
             w.writeheader()
-            for e in sorted_rows:
-                w.writerow(
-                    {
-                        "fecha": e.occurred_on.isoformat() if e.occurred_on else "",
-                        "monto": str(e.amount),
-                        "moneda": e.currency,
-                        "comercio": e.merchant,
-                        "descripcion": e.description,
-                    }
-                )
+            for row in sorted_rows:
+                w.writerow({h: row.get(h, "") for h in self.HEADERS})
         logger.info(
             "CSV: archivo [bold]reemplazado[/bold] con [bold]%d[/bold] fila(s) en [bold]%s[/bold]",
             len(sorted_rows),

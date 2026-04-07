@@ -21,8 +21,10 @@ class Parser(ABC):
 
 
 def parse_with_chain(raw: RawEmail, parsers: list[Parser]) -> list[Expense]:
-    out: list[Expense] = []
+    """
+    Solo el primer parser que hace match procesa el correo (evita duplicar si varios matchean).
+    """
     for p in parsers:
         if p.match(raw):
-            out.extend(p.parse(raw))
-    return out
+            return p.parse(raw)
+    return []

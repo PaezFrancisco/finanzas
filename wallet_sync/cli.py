@@ -36,13 +36,13 @@ def main() -> None:
     help="Solo advertencias y errores.",
 )
 def sync_cmd(project_root: Path | None, verbose: bool, quiet: bool) -> None:
-    """Lee IMAP, parsea Santander/ARQ y exporta gastos nuevos."""
+    """Lee IMAP, compara con la BD y escribe el CSV solo con gastos nuevos."""
     if verbose and quiet:
         raise click.UsageError("Elige solo uno: --verbose (-v) o --quiet (-q).")
     root = project_root or Path.cwd()
     load_env(root)
     setup_logging(verbose=verbose, quiet=quiet)
-    raise SystemExit(run_sync(project_root))
+    raise SystemExit(run_sync(root))
 
 
 if __name__ == "__main__":

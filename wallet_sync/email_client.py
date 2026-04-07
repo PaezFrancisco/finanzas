@@ -22,6 +22,7 @@ class RawEmail:
     from_addr: str
     date: datetime | None
     body_text: str
+    imap_uid: str = ""
 
 
 def _html_to_text(html: str) -> str:
@@ -181,9 +182,10 @@ class ImapClient:
         if not isinstance(raw, (bytes, bytearray)):
             return None
         msg = email.message_from_bytes(raw)
+        uid_s = uid.decode(errors="replace")
         mid = msg.get("Message-ID") or ""
         if not mid:
-            mid = f"no-mid-{uid.decode(errors='replace')}"
+            mid = f"no-mid-{uid_s}"
         subject = _decode_mime_header(msg.get("Subject") or "")
         from_addr = _decode_mime_header(msg.get("From") or "")
         date_hdr = msg.get("Date")
@@ -195,6 +197,7 @@ class ImapClient:
             from_addr=from_addr,
             date=dt,
             body_text=body,
+            imap_uid=uid_s,
         )
 
     def iter_recent(

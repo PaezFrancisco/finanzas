@@ -37,12 +37,12 @@ Verás en consola el flujo: archivo de config, parsers, conexión IMAP, cuántos
 - **Solo avisos/errores**: `python -m wallet_sync sync -q`
 - **Nivel por entorno**: `WALLET_LOG_LEVEL=DEBUG` en `.env`
 
-- Genera o actualiza `data/gastos_wallet.csv` (columnas: `fecha`, `monto`, `moneda`, `comercio`, `descripcion`).
+- **Comportamiento fijo:** se leen los mails en la ventana `lookback_days`, cada gasto se compara con `data/sync_state.db`; si **ya estaba importado**, se descarta. Luego se **reemplaza por completo** `data/gastos_wallet.csv` con **solo** los gastos nuevos de esa corrida (no es un historial acumulado en el archivo). Columnas: `fecha`, `monto`, `moneda`, `comercio`, `descripcion`, **`stable_id`** (podés ignorar la última al importar en la wallet si solo usás las cinco primeras).
 - Estado de importación: `data/sync_state.db` (no lo subas a git si quieres privacidad; ya está ignorado en `.gitignore` vía `data/`).
 
 La ruta del CSV se define en `wallet.csv_path` dentro de `config.yaml`.
 
-`wallet.csv_mode` puede ser `append` (por defecto: solo gastos nuevos según `sync_state.db`) o `replace`: en cada sync **se sobrescribe** el CSV con los movimientos únicos de la ventana IMAP (`lookback_days`). Sirve si el archivo acumuló duplicados o querés que coincida con lo que hay en el buzón en ese rango. Fuera de esa ventana, los mails no entran: si necesitás histórico largo en un solo CSV, subí `lookback_days` o volvé a `append`.
+La clave en la base unifica **Message-ID** (sin diferencias por `<>` o mayúsculas), **monto en 2 decimales** y **UID IMAP** cuando el correo no trae `Message-ID`. Las claves viejas del SQLite siguen reconociéndose para no volver a exportar el mismo gasto.
 
 Tras cada exportación con gastos nuevos, la consola muestra un **resumen de ARS por día** (separando ARQ y Santander) para que puedas cruzar cada fecha con los **USD** que convertiste en la app ARQ y cargarlos en tu cuenta USD de la wallet.
 
